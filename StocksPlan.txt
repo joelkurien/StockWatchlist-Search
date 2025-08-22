@@ -1,0 +1,38 @@
+intraday prices - date time
+daily adjusted - date
+weekly adjusted - date
+monthly adjusted - date 
+
+C:\Users\susan\AppData\Local\Programs\Python\Python312\python.exe
+
+analysis values to calculate:
+EPS values
+PE values
+average volumes
+shares float
+
+sentiment analysis requirements:
+goal: suggest if you need to sell/buy/hold the stock based on your invested amount so that you can maximize your returns
+
+data reqs:
+market data = opening price, closing price,high, low, vol
+moving averages (SMA, EMA) - fetch from data analysis
+RSI
+MACD
+Bollinger bands
+volume trends
+EPS
+revenue
+profit
+pe
+earning surprises + calender
+insider trading activity
+
+class analysis: analyst rating have to get it from somewhere.
+generate this data somehow
+
+
+create a earning chart: actual earnings, earning surprises
+income statement from SEC filings
+
+analyse the performance
