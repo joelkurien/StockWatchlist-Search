@@ -1,4 +1,4 @@
-class ExpontialMovingAverage():
+class StreamingEMA():
     def __init__(self, period, smoothing):
         self.period = period
         self.ema = 0

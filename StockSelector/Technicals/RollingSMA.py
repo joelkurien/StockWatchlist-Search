@@ -1,6 +1,6 @@
 from collections import deque
 
-class SimpleMovingAverage():
+class RollingSMA():
     def __init__(self, window):
         self.queue = deque()
         if window > 0:

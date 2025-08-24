@@ -9,12 +9,18 @@ import finnhub
 import pandas
 import datetime
 from .feateng import FeatureAnalysis
+from dotenv import load_dotenv
+import os
 
 
 from .forms import StockSearchForm
 from . import models
 
-__finnhubClient = finnhub.Client(api_key="d1vfba1r01qqgeel7o60d1vfba1r01qqgeel7o6g")
+load_dotenv("./content.env")
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
+ALPHAVANTAGE_API_KEY = os.getenv("ALPHAVANTAGE_API_KEY")
+
+__finnhubClient = finnhub.Client(api_key=FINNHUB_API_KEY)
 __featureAnalysis = FeatureAnalysis()
 
 # Create your views here.
@@ -35,10 +41,10 @@ def searchStock(request):
 
 def getStockClosePrice(stock, time):
     timeOptions = {
-        'intraday': f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={stock}&interval=5min&apikey=demo',
-        'daily': f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol={stock}&apikey=demo',
-        'weekly': f'https://www.alphavantage.co/query?function=TIME_SERIES_WEEKLY_ADJUSTED&symbol={stock}&apikey=demo',
-        'monthly': f'https://www.alphavantage.co/query?function=TIME_SERIES_MONTHLY_ADJUSTED&symbol={stock}&apikey=demo'
+        'intraday': f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={stock}&interval=5min&apikey={ALPHAVANTAGE_API_KEY}',
+        'daily': f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol={stock}&apikey={ALPHAVANTAGE_API_KEY}',
+        'weekly': f'https://www.alphavantage.co/query?function=TIME_SERIES_WEEKLY_ADJUSTED&symbol={stock}&apikey={ALPHAVANTAGE_API_KEY}',
+        'monthly': f'https://www.alphavantage.co/query?function=TIME_SERIES_MONTHLY_ADJUSTED&symbol={stock}&apikey={ALPHAVANTAGE_API_KEY}'
     }
     try:
         if time in timeOptions:
@@ -96,7 +102,7 @@ def getBasicFinancialMetrics(request):
             baseStatJson = metricJson
             flag = True
         
-        dailyStockUrl = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol={stock}&apikey=demo'
+        dailyStockUrl = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol={stock}&apikey={ALPHAVANTAGE_API_KEY}'
         r = requests.get(dailyStockUrl)
         data = r.json()
         timeSeries = list(data.keys())[1]
@@ -110,13 +116,15 @@ def getBasicFinancialMetrics(request):
             "Average Volume(30D)",
             monthAvgVol[[idx for idx in monthAvgVol.index if 'volume' in idx][0]]
         ]
-        
         today = datetime.date.today()
         yesterday = today - datetime.timedelta(days=30)
-        baseStatJson['baseEPS'] = [
-            "Basic EPS",
-            __finnhubClient.earnings_calendar(_from=yesterday.strftime('%Y-%m-%d'), to=today.strftime('%Y-%m-%d'), symbol=stock, international=False)['earningsCalendar'][0]['epsActual']
-        ]
+        earnings = __finnhubClient.earnings_calendar(_from=yesterday.strftime('%Y-%m-%d'), to=today.strftime('%Y-%m-%d'), symbol=stock, international=False)['earningsCalendar']
+        if earnings and 'epsActual' in earnings[0]:
+            baseStatJson['baseEPS'] = [
+                "Basic EPS",
+                earnings[0]['epsActual']
+            ]
+
         baseStatJson['marketCap'] = [
             "Market Capitalization",
             __finnhubClient.company_profile2(symbol=stock).get("marketCapitalization")
