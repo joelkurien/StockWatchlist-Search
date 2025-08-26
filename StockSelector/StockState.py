@@ -1,4 +1,5 @@
 import contextlib
+from functools import partial
 from channels.generic.websocket import AsyncWebsocketConsumer
 import os, json, asyncio, aiohttp, datetime
 import websockets
@@ -22,7 +23,8 @@ class StockState(AsyncWebsocketConsumer):
         self.p_latest = f"stock|{self.stockTick}|latest"
         self.p_open = f"stock|{self.stockTick}|open|{datetime.date.today():%Y-%m-%d}"
         self.p_bars = f"stock|{self.stockTick}|bars|5m"
-        self.p_ind = f"stock|{self.stockTick}|indicators|5m"
+        self.p_bars1m = f"stock|{self.stockTick}|bars|1m"
+        self.p_ind = f"stock|{self.stockTick}|indicators|1m"
         
         self.ind_periods = {
             "sma": 20,
@@ -33,8 +35,24 @@ class StockState(AsyncWebsocketConsumer):
         self.sma = RollingSMA(self.ind_periods['sma'])
         self.ema = StreamingEMA(self.ind_periods['ema'], 2)
         
-        self.currentBucketStart = None
-        self.currentBucketClose = None
+        self.current1mBucketData = {
+            'start': None,
+            'high': None,
+            'low': None,
+            'open': None,
+            'bucketVol': 0
+        }
+        
+        self.current5mBucketData = {
+            'start': None,
+            'high': None,
+            'low': None,
+            'open': None,
+            'bucketVol': 0
+        }
+        
+        self.updatedPrice = None
+        self.currentPrice = None
         
         await self.accept()
         
@@ -44,6 +62,8 @@ class StockState(AsyncWebsocketConsumer):
         
         self.keep_streaming = True
         self.stream_task = asyncio.create_task(self.priceStream())
+        
+        self.priceUpdateTask = asyncio.create_task(self.updatePricePerMinute())
         
     async def disconnect(self, close_code):
         self.keep_streaming = False
@@ -62,6 +82,14 @@ class StockState(AsyncWebsocketConsumer):
                     await self.finnhubSocket.close()
             except Exception as e:
                 print("Error closing websocket:", e)
+        
+        if hasattr(self, 'priceUpdateTask'):
+            try:
+                self.priceUpdateTask.cancel()
+                with contextlib.suppress(Exception):
+                    await self.priceUpdateTask
+            except:
+                print("Error in cancelling minute price updation.")
         
         with contextlib.suppress(Exception):
             close = getattr(self.redis, "aclose", None)
@@ -84,7 +112,30 @@ class StockState(AsyncWebsocketConsumer):
             liveData = await self.redis.get(self.p_latest)
             if liveData:
                 await self.send(liveData)
-    
+            elif data.get("action") == "get_1mcandles":
+                candleData = await self.redis.lindex(self.p_bars1m, 0)
+                if candleData:
+                    await self.send(json.dumps({
+                        "type": "hist_minute_candle",
+                        "data": json.loads(candleData),
+                        "stock": self.stockTick,
+                        "summary": "Latest 1m stock candle"
+                    }))    
+            elif data.get("action") == "get_allcandles":
+                length = data.get("count", 100)
+                candles = await self.redis.lrange(self.p_bars1m, 0, length-1)
+                candleData = []
+                for candle in candles:
+                    try:
+                        candleData.append(json.loads(candle))
+                    except Exception:
+                        continue
+                await self.send(json.dumps({
+                    "type": "history_candles",
+                    "data": candleData,
+                    "length": len(candleData)
+                }))
+                
     async def _getOpeningPrice(self):
         cacheData = await self.redis.get(self.p_open)
         if cacheData is not None and float(cacheData) > float(0):
@@ -116,19 +167,23 @@ class StockState(AsyncWebsocketConsumer):
         return openingF
     
     async def _getRedisSeed(self):
-        count = max(self.ind_periods['sma'], self.ind_periods['ema']) + 10
-        candles = await self.redis.lrange(self.p_bars, 0, count)
-        priceQueue = []
-        for candle in candles:
-            try:
-                cObj = json.loads(candle)
-                priceQueue.append(cObj['close'])
-            except Exception as e:
-                continue
-        
-        if priceQueue:
-            self.sma.seed(priceQueue)
-            self.ema.seed(priceQueue[-1])
+        try:
+            count = max(self.ind_periods['sma'], self.ind_periods['ema']) + 10
+            candles = await self.redis.lrange(self.p_bars, 0, count)
+            priceQueue = []
+            for candle in candles:
+                try:
+                    cObj = json.loads(candle)
+                    priceQueue.append(cObj['close'])
+                except Exception as e:
+                    continue
+            
+            if priceQueue:
+                self.sma.seed(priceQueue)
+                self.ema.seed(priceQueue[-1])
+        except Exception as err:
+            print("This is breaking")
+            print(err)
         
     async def _ws_unsubscribe(self, symbol):
         await self.finnhubSocket.send(json.dumps({
@@ -143,9 +198,9 @@ class StockState(AsyncWebsocketConsumer):
         }))
     
     @staticmethod
-    def _startBucket(time):
+    def _startBucket(time, intervals):
         s = time // 1000
-        return s // 300 * 300
+        return s // intervals * intervals
     
     async def _closeBucket(self):
         if self.currentBucketStart is None or self.currentBucketClose is None:
@@ -217,16 +272,6 @@ class StockState(AsyncWebsocketConsumer):
                                     time = int(tr.get("t"))
                                 except Exception:
                                     continue
-                                bucket = self._startBucket(time)
-                                if self.currentBucketStart is None or self.currentBucketStart != bucket:
-                                    self.currentBucketStart = bucket
-                                
-                                if bucket != self.currentBucketStart:
-                                    await self._closeBucket()
-                                    self.currentBucketStart = bucket
-                                    self.currentBucketClose = None
-                                
-                                self.currentBucketClose = price
                                 await self._livePublish(price)
                         elif callType == "ping":
                             pass
