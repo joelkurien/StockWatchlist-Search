@@ -132,6 +132,8 @@ def getBasicFinancialMetrics(request):
         if not flag:
             raise ValidationError("The stock has no valid metric values/stock data is incorrect")
         return Response(baseStatJson)
-    except Exception as err:
+    except finnhub.FinnhubAPIException as ferr:
+        return Response({})
+    except (Exception) as err:
         return Response(err)    
     
